@@ -1,27 +1,8 @@
 """
 photo_filter.py
 ───────────────────────────────────────────────────────────────────────────────
-AI Photo Filter — faithful recreation of the University of Michigan Summer
-Coding Program notebook.
+AI Photo Filter
 
-All core logic is taken directly from the course code cells:
-  • base_plus_lens()              — course cell 1
-  • detect_visualize_eyes()       — course cv2 upgrade cell
-  • eyes_angle_degrees()          — reconstructed from eyedetectionutils
-                                    (output signature fully visible at every
-                                     call site in the course)
-  • distance_2d_points()          — course cell
-  • rotate_img_coords()           — course cell
-  • compute_rotated_lens_dest()   — course cell
-  • Sunglasses anchor points      — course cell (sun_left_eye_xy / sun_right_eye_xy)
-  • Full placement pipeline       — course cell (display_angled_shifted_sunglasss)
-
-Added for standalone use (not course logic):
-  • Drag-and-drop / file-dialog GUI  (tkinter + tkinterdnd2 if available)
-  • Programmatic sunglasses.png      (course used an external asset file;
-                                      generated here as a drop-in replacement)
-
-Install:
     pip install opencv-python pillow numpy
     pip install tkinterdnd2          # optional — enables true drag-and-drop
 
@@ -36,51 +17,32 @@ import os
 import sys
 import numpy as np
 import cv2 as cv
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  COURSE CELL 1 — base_plus_lens  (verbatim)
-# ══════════════════════════════════════════════════════════════════════════════
 
 def base_plus_lens(base, lens, dest=(0, 0), scale=1, angle=0):
-    # .convert copies the image and translates it into an RGBA colorspace
-    # (i.e., RGB + transparency). This is necessary for us to add images
-    # with transparency on top of it.
     pasted = base.convert("RGBA")
 
-    lens = lens.rotate(angle, expand=True)  # expand=True makes sure to enlarge image after rotation
-    # scale the dimensions, round them to ints, and make sure they're >= 1px
+    lens = lens.rotate(angle, expand=True)
+
     new_width = round(scale * lens.width)
     new_height = round(scale * lens.height)
     lens = lens.resize((new_width, new_height))
-    # The methods that operate in-place (like alpha_composite) don't
-    # actually return the image (they return None), so you can't chain
-    # them together (like market.copy().convert().alpha_composite()).
+
     pasted.alpha_composite(lens, dest=dest)
     return pasted
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  COURSE cv2 UPGRADE CELL — detect_visualize_eyes
-#  The course showed this cell with a comment "Some other code to zoom into
-#  only the face part of the image" — that standard OpenCV face-ROI crop is
-#  filled in here; all named variables match the course exactly.
-# ══════════════════════════════════════════════════════════════════════════════
-
 def detect_visualize_eyes(image_filename, eye_model='eye'):
-
     frame = cv.imread(image_filename)
     frame_gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
     frame_gray = cv.equalizeHist(frame_gray)
 
-    # -- Detect faces
     face_cascade = cv.CascadeClassifier(
         cv.data.haarcascades + 'haarcascade_frontalface_alt.xml'
     )
     faces = face_cascade.detectMultiScale(frame_gray)
 
-    # Choose eye cascade file based on eye_model argument
     if eye_model == 'eye':
         cv_eye_model_file = cv.data.haarcascades + 'haarcascade_eye.xml'
     else:
@@ -89,15 +51,11 @@ def detect_visualize_eyes(image_filename, eye_model='eye'):
     eyes_center = None
     visualized_image = None
 
-    if len(faces) > 0:  # check to see if any faces are detected
+    if len(faces) > 0:
 
-        # -- Zoom into only the face part of the image --
-        # Use the largest detected face
         faces_sorted = sorted(faces, key=lambda f: f[2] * f[3], reverse=True)
         fx, fy, fw, fh = faces_sorted[0]
 
-        # faceROI is the part of image with the face
-        # Restrict to upper 55% of face — eyes are never in the lower half
         faceROI = frame_gray[fy: fy + int(fh * 0.55), fx: fx + fw]
 
         eyes_cascade = cv.CascadeClassifier(cv_eye_model_file)
@@ -108,12 +66,10 @@ def detect_visualize_eyes(image_filename, eye_model='eye'):
             minSize=(20, 20)
         )
 
-        # Convert eye coords from face-ROI space back to full-image space
         eyes = []
         for (ex, ey, ew, eh) in eyes_raw:
             eyes.append((fx + ex, fy + ey, ew, eh))
 
-        # Draw visualisation rectangles (BGR -> RGB -> PIL)
         vis_frame = frame.copy()
         cv.rectangle(vis_frame, (fx, fy), (fx + fw, fy + fh), (255, 0, 0), 2)
         for (ex, ey, ew, eh) in eyes:
@@ -135,22 +91,6 @@ def detect_visualize_eyes(image_filename, eye_model='eye'):
     return faces, eyes_center, visualized_image
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  EYEDETECTIONUTILS RECONSTRUCTION — eyes_angle_degrees
-#
-#  This function was inside the course's eyedetectionutils module (source not
-#  shown). Its exact return signature is visible at every call site:
-#
-#      angle_eyes, left_eye_xy, right_eye_xy = eyes_angle_degrees(eyes)
-#
-#  From the course print statements:
-#    "Right eye is at X degrees (counter-clockwise) relative to left eye."
-#    "Positive degrees = right eye tilted up / counter-clockwise"
-#    "Negative degrees = right eye tilted down / clockwise"
-#
-#  Implementation reconstructed from these constraints only.
-# ══════════════════════════════════════════════════════════════════════════════
-
 def eyes_angle_degrees(eyes):
     """
     Takes the eyes list from detect_visualize_eyes — list of
@@ -165,10 +105,8 @@ def eyes_angle_degrees(eyes):
     if eyes is None or len(eyes) < 2:
         raise ValueError("Need at least 2 detected eyes to compute angle.")
 
-    # Compute center point of each eye bounding box
     centers = [(x + w // 2, y + h // 2) for (x, y, w, h) in eyes]
 
-    # Sort left-to-right by x coordinate
     centers.sort(key=lambda c: c[0])
 
     left_eye_xy  = centers[0]
@@ -177,19 +115,14 @@ def eyes_angle_degrees(eyes):
     dx = right_eye_xy[0] - left_eye_xy[0]
     dy = right_eye_xy[1] - left_eye_xy[1]
 
-    # Counter-clockwise: right eye above left → positive angle
     angle_eyes = math.degrees(math.atan2(-dy, dx))
 
     return angle_eyes, left_eye_xy, right_eye_xy
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  COURSE CELL — distance_2d_points  (verbatim)
-# ══════════════════════════════════════════════════════════════════════════════
-
 def distance_2d_points(point1_xy, point2_xy):
-    x1 = point1_xy[0]  # the first element in a Python list has index 0!
-    y1 = point1_xy[1]  # the second element in a Python list has index 1!
+    x1 = point1_xy[0]
+    y1 = point1_xy[1]
 
     x2 = point2_xy[0]
     y2 = point2_xy[1]
@@ -200,16 +133,11 @@ def distance_2d_points(point1_xy, point2_xy):
     return distance
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  COURSE CELL — rotate_img_coords  (verbatim)
-# ══════════════════════════════════════════════════════════════════════════════
-
 def rotate_img_coords(x, y, w, h, theta_radians=0):
 
     r = math.sqrt(x ** 2 + y ** 2)
     gamma_radians = math.atan2(y, x)
 
-    ## Assume theta is counter clockwise rotation
     net_rotation = gamma_radians - theta_radians
 
     x_bar = r * math.cos(net_rotation)
@@ -222,15 +150,11 @@ def rotate_img_coords(x, y, w, h, theta_radians=0):
         x_new = x_bar
         y_new = y_bar + w * math.sin(theta_radians)
 
-    x_new = int(x_new)  # make them integers since x, y coordinates of image are integers
+    x_new = int(x_new)
     y_new = int(y_new)
 
     return x_new, y_new
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  COURSE CELL — compute_rotated_lens_dest  (verbatim)
-# ══════════════════════════════════════════════════════════════════════════════
 
 def compute_rotated_lens_dest(img_left_eye_xy, sun_left_eye_xy, sun_width,
                                sun_height, angle_eyes_degrees, new_scale):
@@ -246,11 +170,11 @@ def compute_rotated_lens_dest(img_left_eye_xy, sun_left_eye_xy, sun_width,
         ang_eyes_radians
     )
 
-    sun_leye_new_x = new_scale * sun_leye_new_x  # because rescaling just multiplies everything up/down by factor
+    sun_leye_new_x = new_scale * sun_leye_new_x
     sun_leye_new_y = new_scale * sun_leye_new_y
 
-    img_left_eye_x = img_left_eye_xy[0]  # again, because first element in python has index 0!
-    img_left_eye_y = img_left_eye_xy[1]  # again, because second element in python has index 1!
+    img_left_eye_x = img_left_eye_xy[0]
+    img_left_eye_y = img_left_eye_xy[1]
 
     dest_x = img_left_eye_x - sun_leye_new_x
     dest_y = img_left_eye_y - sun_leye_new_y
@@ -258,12 +182,7 @@ def compute_rotated_lens_dest(img_left_eye_xy, sun_left_eye_xy, sun_width,
     dest = (int(dest_x), int(dest_y))
 
     return dest
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  COURSE CELL — sunglasses anchor points  (verbatim)
-#  (came from the ipydraw PointPicker cell in the course notebook)
-# ══════════════════════════════════════════════════════════════════════════════
+                                 
 
 sun_left_eye_x   = 175
 sun_left_eye_y   = 110
@@ -271,16 +190,7 @@ sun_left_eye_xy  = (175, 110)
 sun_right_eye_xy = (485, 110)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  COURSE CELL — full placement pipeline
-#  (logic from display_angled_shifted_sunglasss, de-widgetised for CLI/GUI use)
-# ══════════════════════════════════════════════════════════════════════════════
-
 def apply_sunglasses_to_file(image_filename, sunglasses_img):
-    """
-    Full course pipeline:  detect → angle → scale → rotate-dest → composite.
-    Returns the composited PIL Image, or the original image if eyes not found.
-    """
     base_img = Image.open(image_filename)
 
     faces, eyes, visualized_image = detect_visualize_eyes(image_filename, 'eye')
@@ -319,15 +229,6 @@ def apply_sunglasses_to_file(image_filename, sunglasses_img):
     )
     return result
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  SUNGLASSES ASSET — generated programmatically
-#  The course used an external sunglasses.png.  This generator produces a
-#  replacement whose left-eye anchor sits at (175,110) and right-eye anchor
-#  at (485,110), matching the course hardcoded values exactly.
-#  If you have the original sunglasses.png, place it in the same folder and
-#  it will be used automatically instead.
-# ══════════════════════════════════════════════════════════════════════════════
 
 def make_sunglasses_image(style="gold"):
     """
@@ -375,15 +276,6 @@ def make_sunglasses_image(style="gold"):
 
     return img
 
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  EXTRA EFFECTS — added (not course code)
-#  These implement the color overlay and vignette visible in the course
-#  screenshot, using PIL/NumPy only (no new dependencies).
-# ══════════════════════════════════════════════════════════════════════════════
-
-from PIL import ImageFilter
 
 def apply_color_tint(img, color_rgb, opacity=90):
     """
@@ -439,12 +331,7 @@ def apply_portrait_blur(img, image_filename):
     )
     mask = mask.filter(ImageFilter.GaussianBlur(radius=max(1, expand // 2)))
     return Image.composite(result, blurred, mask)
-
-
-
-#  Uses tkinterdnd2 for real OS drag-and-drop if installed; falls back to a
-#  clickable zone that opens a file-dialog instead.
-# ══════════════════════════════════════════════════════════════════════════════
+  
 
 def run_gui():
 
@@ -471,7 +358,6 @@ def run_gui():
              font=("Helvetica", 11),
              bg="#1e1e2e", fg="#a6adc8").pack(pady=(0, PAD))
 
-    # ── style + effect selectors ──────────────────────────────────────────────
     sel_frame = tk.Frame(root, bg="#1e1e2e")
     sel_frame.pack(padx=PAD, fill="x")
 
@@ -501,7 +387,6 @@ def run_gui():
                        activebackground="#1e1e2e",
                        font=("Helvetica", 10)).pack(anchor="w", padx=8, pady=1)
 
-    # ── drop zone ─────────────────────────────────────────────────────────────
     drop_frame = tk.Frame(root, width=ZONE_W, height=ZONE_H,
                           bg="#313244",
                           highlightbackground="#585b70",
@@ -527,8 +412,7 @@ def run_gui():
              font=("Helvetica", 10),
              bg="#1e1e2e", fg="#a6e3a1",
              anchor="w").pack(fill="x", padx=PAD, pady=(8, 0))
-
-    # ── processing logic ──────────────────────────────────────────────────────
+─
     def process_image(path):
         path = path.strip().strip("{}")
         if not os.path.isfile(path):
@@ -541,16 +425,13 @@ def run_gui():
         status_var.set(f"Processing: {os.path.basename(path)}  |  style={style}  effect={effect}")
         root.update()
         try:
-            # Use original sunglasses.png only for gold style if it exists
             if style == "gold" and os.path.isfile("sunglasses.png"):
                 sg_img = Image.open("sunglasses.png")
             else:
                 sg_img = make_sunglasses_image(style=style)
 
-            # Full course placement pipeline
             result = apply_sunglasses_to_file(path, sg_img)
 
-            # Apply chosen extra effect on top
             if effect == "pink_overlay":
                 result = apply_color_tint(result, (220, 60, 180), opacity=90)
             elif effect == "purple_overlay":
