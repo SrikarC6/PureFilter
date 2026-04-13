@@ -450,8 +450,10 @@ def run_gui():
 
     try:
         from tkinterdnd2 import TkinterDnD, DND_FILES
+        _test = TkinterDnD.Tk()
+        _test.destroy()
         USE_DND = True
-    except ImportError:
+    except (ImportError, RuntimeError):
         USE_DND = False
 
     import tkinter as tk
